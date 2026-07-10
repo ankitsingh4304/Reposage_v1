@@ -1,0 +1,29 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Data: cloned repos, vector store, model caches
+data/
+!data/.gitkeep
+
+# Generated eval outputs
+eval/results/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Editor / OS / tooling
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db
+Untitled

@@ -1,0 +1,17 @@
+{
+  "name": "psf/requests (vague queries)",
+  "repo": "https://github.com/psf/requests",
+  "note": "Deliberately vague, colloquial questions with the SAME grep-verified ground-truth files as requests.json. These are the queries an agent is meant to help with: base retrieval struggles on underspecified phrasing; the agent's grade+rewrite step should recover them by injecting likely identifiers.",
+  "questions": [
+    { "question": "where's the cert stuff", "relevant_files": ["src/requests/adapters.py"] },
+    { "question": "how does it do the retry thing", "relevant_files": ["src/requests/adapters.py"] },
+    { "question": "the redirect handling", "relevant_files": ["src/requests/sessions.py"] },
+    { "question": "how's auth done here", "relevant_files": ["src/requests/auth.py"] },
+    { "question": "how does it figure out the text encoding", "relevant_files": ["src/requests/utils.py"] },
+    { "question": "the multipart upload thing", "relevant_files": ["src/requests/models.py"] },
+    { "question": "where do the error types live", "relevant_files": ["src/requests/exceptions.py"] },
+    { "question": "the case-insensitive header thing", "relevant_files": ["src/requests/structures.py"] },
+    { "question": "how does the user agent get set", "relevant_files": ["src/requests/utils.py"] },
+    { "question": "the status code names lookup", "relevant_files": ["src/requests/status_codes.py"] }
+  ]
+}

@@ -1,0 +1,11 @@
+# Base theme — Skymint accent on Graphite. Custom CSS in the app refines it further.
+[theme]
+base = "dark"
+primaryColor = "#B8F7E4"            # Skymint
+backgroundColor = "#25272C"         # Graphite
+secondaryBackgroundColor = "#2E3138" # lighter graphite for cards/sidebar
+textColor = "#E8EAED"
+font = "sans serif"
+
+[server]
+headless = true

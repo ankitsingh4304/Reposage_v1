@@ -1,0 +1,32 @@
+{
+  "name": "psf/requests",
+  "repo": "https://github.com/psf/requests",
+  "note": "Ground-truth files verified by grepping the cloned source. Paths are repo-relative to the clone root (src/requests/...). Mix of semantic questions and exact-identifier questions; the latter are where hybrid/keyword retrieval is expected to help.",
+  "questions": [
+    { "question": "How does a Session persist cookies across multiple requests?", "relevant_files": ["src/requests/sessions.py"] },
+    { "question": "Where are HTTP redirects followed and the redirect chain resolved?", "relevant_files": ["src/requests/sessions.py"] },
+    { "question": "How does the Session merge environment settings like proxies and SSL verification?", "relevant_files": ["src/requests/sessions.py"] },
+    { "question": "How is connection pooling implemented for the transport?", "relevant_files": ["src/requests/adapters.py"] },
+    { "question": "Where is retry behavior configured on the HTTP adapter?", "relevant_files": ["src/requests/adapters.py"] },
+    { "question": "How does cert_verify decide which CA bundle to use for SSL verification?", "relevant_files": ["src/requests/adapters.py"] },
+    { "question": "How is HTTP Basic authentication implemented?", "relevant_files": ["src/requests/auth.py"] },
+    { "question": "How does HTTPDigestAuth build the digest authorization header?", "relevant_files": ["src/requests/auth.py"] },
+    { "question": "Where are the top-level get, post, and put helper functions defined?", "relevant_files": ["src/requests/api.py"] },
+    { "question": "How is the request body prepared and encoded before sending?", "relevant_files": ["src/requests/models.py"] },
+    { "question": "How does iter_content stream the response body in chunks?", "relevant_files": ["src/requests/models.py"] },
+    { "question": "How does prepare_url build and validate the final request URL?", "relevant_files": ["src/requests/models.py"] },
+    { "question": "How does _encode_files build a multipart/form-data upload body?", "relevant_files": ["src/requests/models.py"] },
+    { "question": "Where is the CaseInsensitiveDict used for HTTP headers defined?", "relevant_files": ["src/requests/structures.py"] },
+    { "question": "How are cookies stored and looked up in a RequestsCookieJar?", "relevant_files": ["src/requests/cookies.py"] },
+    { "question": "Where are the library's exception classes like ConnectionError and Timeout defined?", "relevant_files": ["src/requests/exceptions.py"] },
+    { "question": "How does default_user_agent build the User-Agent string?", "relevant_files": ["src/requests/utils.py"] },
+    { "question": "How does get_encoding_from_headers determine the response text encoding?", "relevant_files": ["src/requests/utils.py"] },
+    { "question": "How does get_environ_proxies read proxy configuration from the environment?", "relevant_files": ["src/requests/utils.py"] },
+    { "question": "Where is the status code lookup table (codes.ok, codes.not_found) defined?", "relevant_files": ["src/requests/status_codes.py"] },
+    { "question": "How are event hooks dispatched via dispatch_hook?", "relevant_files": ["src/requests/hooks.py"] },
+    { "question": "Where does the adapter's send method actually issue the HTTP request over the connection pool?", "relevant_files": ["src/requests/adapters.py"] },
+    { "question": "How does Session.send drive sending a PreparedRequest and handling the response?", "relevant_files": ["src/requests/sessions.py"] },
+    { "question": "Where is the Python 2/3 compatibility import shim defined?", "relevant_files": ["src/requests/compat.py"] },
+    { "question": "How is a PreparedRequest's headers prepared, including content-length?", "relevant_files": ["src/requests/models.py"] }
+  ]
+}

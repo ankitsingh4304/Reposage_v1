@@ -1,0 +1,24 @@
+# --- Core RAG stack (Phase 1) ---
+sentence-transformers>=3.0        # BGE-M3 local embeddings + (later) cross-encoder reranker
+chromadb>=0.5                     # local vector store
+langchain-text-splitters>=0.3     # code-aware RecursiveCharacterTextSplitter.from_language
+openai>=1.50                      # OpenAI-compatible client → Gemini / Groq / OpenRouter (free)
+anthropic>=0.40                   # optional: native Claude client (LLM_PROVIDER=anthropic)
+python-dotenv>=1.0                # load .env
+tqdm>=4.66                        # ingest progress bars
+
+# --- Phase 2: measured upgrades ---
+rank-bm25>=0.2                    # sparse half of hybrid search
+tree-sitter>=0.23                 # AST-based chunking
+tree-sitter-language-pack>=0.4    # prebuilt grammars (py, js, ts, go, java, ...)
+
+# --- Phase 3: agentic loop ---
+langgraph>=0.2                    # self-correcting retrieve→grade→rewrite→answer state machine
+
+# --- Phase 4: serving ---
+streamlit>=1.38                   # quick chat UI
+fastapi>=0.115                    # backend API
+uvicorn[standard]>=0.30           # ASGI server
+
+# Phase 2 eval (ragas) and Phase 3 (langgraph, langsmith) are added when we reach them,
+# to keep the Phase-1 install lean and fast.
