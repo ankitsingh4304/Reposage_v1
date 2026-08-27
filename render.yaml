@@ -6,8 +6,14 @@ services:
     startCommand: "uvicorn app.api:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: LLM_PROVIDER
-        value: "openai"
-      - key: OPENAI_API_KEY
+        value: "gemini"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: FRONTEND_URL
         sync: false
       - key: PYTHON_VERSION
         value: "3.10.0"
