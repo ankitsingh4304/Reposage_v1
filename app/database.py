@@ -1,18 +1,9 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from pymongo import MongoClient
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./reposage.db"
+MONGO_URI = "mongodb+srv://singhankit16220_db_user:4RcbIwugK0fsKrZr@cluster0.s8rpbqj.mongodb.net/?appName=Cluster0"
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-Base = declarative_base()
+client = MongoClient(MONGO_URI)
+db = client.get_database("reposage")
 
 def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    return db

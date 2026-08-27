@@ -22,3 +22,6 @@ uvicorn[standard]>=0.30           # ASGI server
 
 # Phase 2 eval (ragas) and Phase 3 (langgraph, langsmith) are added when we reach them,
 # to keep the Phase-1 install lean and fast.
+
+# --- Database ---
+pymongo>=4.0

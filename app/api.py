@@ -12,14 +12,13 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from datetime import datetime
 
 from config import CONFIG
 from src.pipeline.rag import RAGPipeline, read_index_meta, get_index_meta_path
 
 from app import models, auth
-from app.database import engine
-
-models.Base.metadata.create_all(bind=engine)
+from app.database import db
 
 app = FastAPI(title="Chat with a Codebase")
 app.add_middleware(
@@ -101,6 +100,15 @@ def ask(body: AskBody, user: models.User = Depends(auth.get_current_user)) -> di
     try:
         pipe = pipeline(user.id)
         ans = pipe.answer_agentic(question) if body.agentic else pipe.answer(question)
+        
+        db.chat_history.insert_one({
+            "user_id": user.id,
+            "question": question,
+            "answer": ans.text,
+            "sources": [s.chunk.citation() for s in ans.sources],
+            "timestamp": datetime.utcnow()
+        })
+        
     except Exception as e:
         raise HTTPException(500, f"{type(e).__name__}: {e}")
     return {
