@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Sparkles } from "lucide-react";
+import { Routes, Route, Navigate } from "react-router-dom";
+import { ArrowUp, Sparkles, LogOut } from "lucide-react";
 import Sidebar from "./components/Sidebar.jsx";
 import Message from "./components/Message.jsx";
 import { Dots } from "./components/Loaders.jsx";
 import { getStatus, ingestRepo, askQuestion } from "./api.js";
+import { useAuth } from "./AuthContext.jsx";
+import Login from "./Login.jsx";
 
 const STARTERS = [
   "What does this project do?",
@@ -13,6 +16,17 @@ const STARTERS = [
 ];
 
 export default function App() {
+  const { isAuthenticated } = useAuth();
+  return (
+    <Routes>
+      <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" />} />
+      <Route path="/" element={isAuthenticated ? <ChatApp /> : <Navigate to="/login" />} />
+    </Routes>
+  );
+}
+
+function ChatApp() {
+  const { logout } = useAuth();
   const [status, setStatus] = useState(null);
   const [messages, setMessages] = useState([]);
   const [ingesting, setIngesting] = useState(false);
@@ -98,7 +112,13 @@ export default function App() {
         setAgentic={setAgentic}
         onClear={() => setMessages([])}
         hasMessages={messages.length > 0}
-      />
+      >
+        <div style={{ marginTop: 'auto', padding: '10px' }}>
+          <button onClick={logout} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <LogOut size={16} /> Logout
+          </button>
+        </div>
+      </Sidebar>
 
       <main className="chat">
         <div className="chat-scroll" ref={scrollRef}>

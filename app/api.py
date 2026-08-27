@@ -8,13 +8,18 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import CONFIG
 from src.pipeline.rag import RAGPipeline, read_index_meta
+
+from app import models, auth
+from app.database import engine
+
+models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Chat with a Codebase")
 app.add_middleware(
@@ -23,6 +28,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth.router)
 
 _pipeline: RAGPipeline | None = None
 _lock = threading.Lock()
@@ -73,7 +80,7 @@ def status() -> dict:
 
 
 @app.post("/api/ingest")
-def ingest(body: IngestBody) -> dict:
+def ingest(body: IngestBody, user: models.User = Depends(auth.get_current_user)) -> dict:
     source = body.source.strip()
     if not source:
         raise HTTPException(400, "Repository URL or path is required.")
@@ -85,7 +92,7 @@ def ingest(body: IngestBody) -> dict:
 
 
 @app.post("/api/ask")
-def ask(body: AskBody) -> dict:
+def ask(body: AskBody, user: models.User = Depends(auth.get_current_user)) -> dict:
     question = body.question.strip()
     if not question:
         raise HTTPException(400, "Question is required.")
