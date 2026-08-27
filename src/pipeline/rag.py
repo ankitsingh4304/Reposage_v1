@@ -4,7 +4,7 @@ import json
 import os
 from dataclasses import dataclass
 
-from config import CONFIG, INDEX_META
+from config import CONFIG, DATA_DIR
 from src.embeddings.bge import BGEEmbedder
 from src.ingest.chunk_factory import chunk_files
 from src.ingest.loader import load_repo
@@ -31,23 +31,28 @@ def format_context(hits: list[Hit]) -> str:
     return "\n\n".join(f"--- {h.chunk.citation()} ---\n{h.chunk.text}" for h in hits)
 
 
-def read_index_meta() -> dict | None:
-    if INDEX_META.exists():
-        with open(INDEX_META, encoding="utf-8") as f:
+def get_index_meta_path(user_id: int | str):
+    return DATA_DIR / f"index_{user_id}.json"
+
+def read_index_meta(user_id: int | str) -> dict | None:
+    path = get_index_meta_path(user_id)
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     return None
 
 
 class RAGPipeline:
-    def __init__(self):
+    def __init__(self, user_id: int | str):
+        self.user_id = user_id
         # query embedder must match the model the index was built with
-        meta = read_index_meta()
+        meta = read_index_meta(user_id)
         if "EMBED_MODEL" in os.environ:
             embed_model = None
         else:
             embed_model = meta.get("embed_model") if meta else None
         self.embedder = BGEEmbedder(model_name=embed_model)
-        self.store = ChromaStore()
+        self.store = ChromaStore(collection_name=f"user_{user_id}")
         self.retriever = make_retriever(self.embedder, self.store)
         self.llm = make_llm()
 
@@ -78,8 +83,9 @@ class RAGPipeline:
             "n_chunks": len(chunks),
             "count": self.store.count(),
         }
-        INDEX_META.parent.mkdir(parents=True, exist_ok=True)
-        with open(INDEX_META, "w", encoding="utf-8") as f:
+        meta_path = get_index_meta_path(self.user_id)
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
         print(f"Done. Collection now holds {self.store.count()} chunks.")
         return len(chunks)

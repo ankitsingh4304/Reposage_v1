@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import CONFIG
-from src.pipeline.rag import RAGPipeline, read_index_meta
+from src.pipeline.rag import RAGPipeline, read_index_meta, get_index_meta_path
 
 from app import models, auth
 from app.database import engine
@@ -31,16 +31,16 @@ app.add_middleware(
 
 app.include_router(auth.router)
 
-_pipeline: RAGPipeline | None = None
+_pipelines: dict[str, RAGPipeline] = {}
 _lock = threading.Lock()
 
 
-def pipeline() -> RAGPipeline:
-    global _pipeline
+def pipeline(user_id: int) -> RAGPipeline:
+    uid = str(user_id)
     with _lock:
-        if _pipeline is None:
-            _pipeline = RAGPipeline()
-        return _pipeline
+        if uid not in _pipelines:
+            _pipelines[uid] = RAGPipeline(uid)
+        return _pipelines[uid]
 
 
 def engine_info() -> dict:
@@ -75,8 +75,8 @@ class AskBody(BaseModel):
 
 
 @app.get("/api/status")
-def status() -> dict:
-    return {"index": read_index_meta(), "engine": engine_info()}
+def status(user: models.User = Depends(auth.get_current_user)) -> dict:
+    return {"index": read_index_meta(user.id), "engine": engine_info()}
 
 
 @app.post("/api/ingest")
@@ -85,10 +85,10 @@ def ingest(body: IngestBody, user: models.User = Depends(auth.get_current_user))
     if not source:
         raise HTTPException(400, "Repository URL or path is required.")
     try:
-        n = pipeline().ingest(source)
+        n = pipeline(user.id).ingest(source)
     except Exception as e:
         raise HTTPException(500, f"{type(e).__name__}: {e}")
-    return {"n_chunks": n, "index": read_index_meta()}
+    return {"n_chunks": n, "index": read_index_meta(user.id)}
 
 
 @app.post("/api/ask")
@@ -96,10 +96,10 @@ def ask(body: AskBody, user: models.User = Depends(auth.get_current_user)) -> di
     question = body.question.strip()
     if not question:
         raise HTTPException(400, "Question is required.")
-    if read_index_meta() is None:
+    if read_index_meta(user.id) is None:
         raise HTTPException(409, "No repository indexed yet.")
     try:
-        pipe = pipeline()
+        pipe = pipeline(user.id)
         ans = pipe.answer_agentic(question) if body.agentic else pipe.answer(question)
     except Exception as e:
         raise HTTPException(500, f"{type(e).__name__}: {e}")
