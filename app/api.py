@@ -22,10 +22,17 @@ from app import models, auth
 from app.database import db
 
 app = FastAPI(title="Chat with a Codebase")
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+frontend_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv("FRONTEND_URL", "http://localhost:5173").split(",")
+    if origin.strip()
+]
+for local_origin in ("http://localhost:5173", "http://127.0.0.1:5173"):
+    if local_origin not in frontend_origins:
+        frontend_origins.append(local_origin)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[frontend_url, "http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=frontend_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -73,6 +80,11 @@ class IngestBody(BaseModel):
 class AskBody(BaseModel):
     question: str
     agentic: bool = False
+
+
+@app.get("/")
+def root() -> dict:
+    return {"status": "ok", "docs": "/docs"}
 
 
 @app.get("/api/status")
