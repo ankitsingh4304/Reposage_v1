@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 from .models import User
 from .database import db
 
-SECRET_KEY = "your-secret-key-here" # Move to env in prod
+SECRET_KEY = os.environ["SECRET_KEY"]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 

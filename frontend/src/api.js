@@ -1,11 +1,12 @@
 async function request(path, options = {}) {
   const token = localStorage.getItem("token");
+  const apiUrl = import.meta.env.VITE_API_URL || "";
   const headers = {
     ...options.headers,
     ...(token ? { Authorization: `Bearer ${token}` } : {})
   };
   
-  const res = await fetch(path, { ...options, headers });
+  const res = await fetch(`${apiUrl}${path}`, { ...options, headers });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.detail || `Request failed (${res.status})`);

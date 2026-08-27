@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import threading
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,9 +22,10 @@ from app import models, auth
 from app.database import db
 
 app = FastAPI(title="Chat with a Codebase")
+frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[frontend_url, "http://localhost:5173", "http://127.0.0.1:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
