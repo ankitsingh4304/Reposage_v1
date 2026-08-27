@@ -25,3 +25,8 @@ uvicorn[standard]>=0.30           # ASGI server
 
 # --- Database ---
 pymongo>=4.0
+
+# --- Authentication ---
+python-jose[cryptography]>=3.3
+passlib[bcrypt]>=1.7
+python-multipart>=0.0.9
