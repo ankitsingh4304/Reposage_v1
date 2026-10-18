@@ -6,6 +6,7 @@ set -e
 if [ "$(id -u)" = "0" ]; then
     mkdir -p /app/data
     chown -R appuser:appuser /app/data
+    export HOME=/home/appuser
     exec setpriv --reuid=appuser --regid=appuser --init-groups "$@"
 fi
 
