@@ -1,3 +1,12 @@
+---
+title: RepoSage
+colorFrom: green
+colorTo: gray
+sdk: docker
+app_port: 8000
+pinned: false
+---
+
 # RepoSage
 
 Ask questions about any GitHub repository in plain English and get answers grounded
@@ -70,7 +79,35 @@ docker compose up --build   # http://localhost:8000
 Cloned repos and Chroma vectors persist in the `reposage-data` volume (`/app/data`).
 Without an LLM key, sign-up, login and indexing still work; only asking fails.
 
-## Deploy to Render
+## Deploy free on Hugging Face Spaces
+
+The free "CPU basic" Space (2 vCPU, 16 GB RAM) runs the Docker image as-is. The
+YAML block at the top of this README is the Space config. The Space disk isn't
+persistent, so indexed repos are lost when the Space restarts or sleeps (after
+48 hours with no visitors), and users simply re-index. Accounts and chat history
+are kept in MongoDB Atlas.
+
+1. MongoDB Atlas: create a free M0 cluster and a database user, allow network
+   access from `0.0.0.0/0`, and copy the `mongodb+srv://...` string.
+2. Hugging Face: **New Space**, SDK **Docker** (blank template), hardware
+   **CPU basic (free)**, visibility Public.
+3. In the Space, go to **Settings > Variables and secrets** and add the secrets
+   `MONGO_URI`, `SECRET_KEY` (any long random string) and `GROQ_API_KEY`.
+4. Push this repo to the Space. Either do it once by hand:
+
+   ```bash
+   git remote add space https://huggingface.co/spaces/<hf-user>/<space-name>
+   git push --force space main   # password = HF access token with write permission
+   ```
+
+   or let `.github/workflows/sync-hf-space.yml` push on every commit to `main`
+   (add the repo secret `HF_TOKEN` and the variable `HF_SPACE=<hf-user>/<space-name>`
+   in GitHub, then re-run the workflow from the Actions tab).
+5. After the build finishes, open `https://<hf-user>-<space-name>.hf.space`.
+   Use that direct URL, not the huggingface.co page, because the embedded
+   iframe can block the login token in some browsers.
+
+## Deploy to Render (paid)
 
 `render.yaml` defines one Docker web service with a persistent disk. MongoDB is
 hosted separately on MongoDB Atlas.
