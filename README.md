@@ -20,7 +20,8 @@ rewrites the query to retry when the first attempt is weak.
 
 ## Stack
 
-- Embeddings: BGE-M3 (local) via `sentence-transformers`, or a smaller MiniLM model
+- Embeddings: MiniLM via fastembed (ONNX, no PyTorch), or BGE-M3 via `sentence-transformers`
+  (`pip install sentence-transformers`)
 - Vector store: Chroma
 - Retrieval: dense + BM25 hybrid (RRF), cross-encoder reranker
 - Chunking: language-aware splitter, optional tree-sitter
@@ -68,7 +69,7 @@ uvicorn app.api:app          # serves the UI + API on http://localhost:8000
 ## Docker
 
 The image builds the React UI and serves it from FastAPI on one port, with the
-embedding model (`all-MiniLM-L6-v2` by default) baked in. `docker-compose.yml`
+embedding model (`all-MiniLM-L6-v2` on ONNX) baked in. `docker-compose.yml`
 adds a local MongoDB.
 
 ```bash
@@ -79,49 +80,37 @@ docker compose up --build   # http://localhost:8000
 Cloned repos and Chroma vectors persist in the `reposage-data` volume (`/app/data`).
 Without an LLM key, sign-up, login and indexing still work; only asking fails.
 
-## Deploy free on Hugging Face Spaces
+## Deploy free on Render
 
-The free "CPU basic" Space (2 vCPU, 16 GB RAM) runs the Docker image as-is. The
-YAML block at the top of this README is the Space config. The Space disk isn't
-persistent, so indexed repos are lost when the Space restarts or sleeps (after
-48 hours with no visitors), and users simply re-index. Accounts and chat history
-are kept in MongoDB Atlas.
-
-1. MongoDB Atlas: create a free M0 cluster and a database user, allow network
-   access from `0.0.0.0/0`, and copy the `mongodb+srv://...` string.
-2. Hugging Face: **New Space**, SDK **Docker** (blank template), hardware
-   **CPU basic (free)**, visibility Public.
-3. In the Space, go to **Settings > Variables and secrets** and add the secrets
-   `MONGO_URI`, `SECRET_KEY` (any long random string) and `GROQ_API_KEY`.
-4. Push this repo to the Space. Either do it once by hand:
-
-   ```bash
-   git remote add space https://huggingface.co/spaces/<hf-user>/<space-name>
-   git push --force space main   # password = HF access token with write permission
-   ```
-
-   or let `.github/workflows/sync-hf-space.yml` push on every commit to `main`
-   (add the repo secret `HF_TOKEN` and the variable `HF_SPACE=<hf-user>/<space-name>`
-   in GitHub, then re-run the workflow from the Actions tab).
-5. After the build finishes, open `https://<hf-user>-<space-name>.hf.space`.
-   Use that direct URL, not the huggingface.co page, because the embedded
-   iframe can block the login token in some browsers.
-
-## Deploy to Render (paid)
-
-`render.yaml` defines one Docker web service with a persistent disk. MongoDB is
+`render.yaml` is a Render Blueprint for one Docker web service on the **free plan**
+(512 MB RAM, 0.1 CPU, no credit card). Embeddings run on ONNX via fastembed
+instead of PyTorch, so the app peaks at about 400 MB while indexing. MongoDB is
 hosted separately on MongoDB Atlas.
 
-1. Create a free MongoDB Atlas M0 cluster, add a database user, allow network
+1. Create a free MongoDB Atlas M0 cluster and a database user, allow network
    access from `0.0.0.0/0`, and copy the `mongodb+srv://...` connection string.
-2. Get an LLM key (Groq is the default: https://console.groq.com/keys).
-3. In Render: **New > Blueprint**, pick this repo. Fill in `MONGO_URI` and
-   `GROQ_API_KEY` when prompted (`SECRET_KEY` is generated; leave `FRONTEND_URL`
-   empty unless the UI is also hosted elsewhere).
+2. Get an LLM key. Groq is the default: https://console.groq.com/keys.
+3. In Render, go to **New > Blueprint** and pick this repo. Fill in `MONGO_URI`
+   and `GROQ_API_KEY` when prompted. Render generates `SECRET_KEY` itself; leave
+   `FRONTEND_URL` empty.
 4. Wait for the deploy, then open `https://<service>.onrender.com` and sign up.
 
-The service needs the Standard plan (2 GB RAM) or larger and a disk, so it is not
-on Render's free tier. Health check: `GET /api/health`.
+Free-plan limits to know about:
+
+- **Sleeping.** The service sleeps after 15 minutes without traffic, and the
+  next visit takes about a minute to wake it.
+- **No persistent disk.** Indexed repos are lost on sleep or redeploy, so users
+  re-index. Accounts and chat history stay in Atlas.
+- **Slow indexing on 0.1 CPU.** A small repo (itsdangerous, 121 chunks) takes
+  about 1.5 minutes, and psf/requests (711 chunks) about 7 minutes. Use small
+  repos for demos.
+
+For an always-on service, switch the plan to `starter` or higher and add a
+`disk` mounted at `/app/data` (see the comments in `render.yaml`).
+
+Hugging Face Docker Spaces would also work, since the README's YAML header is
+the Space config and `.github/workflows/sync-hf-space.yml` pushes `main` to a
+Space. However, Docker Spaces now require a PRO subscription.
 
 CLI:
 
@@ -152,7 +141,10 @@ Metrics are at file level over the top 10 retrieved chunks:
 - **MRR**: the mean of 1 / rank of the first correct file.
 - **Recall@10**: the share of correct files found in the top 10.
 
-Reproduce all runs with `sh eval/run_matrix.sh`; results are written to
+MiniLM runs on the fastembed ONNX backend. Re-running them on it matched the
+sentence-transformers numbers below, to within 0.004 MRR. The BGE-M3 rows need
+`pip install sentence-transformers`. Reproduce all runs with
+`sh eval/run_matrix.sh`; results are written to
 `eval/results/`.
 
 **Precise questions (25)**
