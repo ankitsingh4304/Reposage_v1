@@ -15,6 +15,8 @@ def _print_answer(answer) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="chat_with_repo")
+    parser.add_argument("--user", default="cli",
+                        help="Index namespace (one Chroma collection per user)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_ingest = sub.add_parser("ingest", help="Index a repo (local path or git URL)")
@@ -42,12 +44,12 @@ def main(argv: list[str] | None = None) -> int:
         from eval.harness import run_cli
 
         run_cli(args.eval_set, label=args.label, retrieve_k=args.k, compare_to=args.compare,
-                agentic=args.agentic)
+                agentic=args.agentic, user_id=args.user)
         return 0
 
     from src.pipeline.rag import RAGPipeline
 
-    pipeline = RAGPipeline()
+    pipeline = RAGPipeline(args.user)
 
     if args.command == "ingest":
         pipeline.ingest(args.source, reset=not args.no_reset)
