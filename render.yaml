@@ -1,20 +1,21 @@
 # Render Blueprint: one Docker web service serving the API + React UI.
-# MongoDB is external (MongoDB Atlas free M0). See README "Deploy to Render".
+# MongoDB is external (MongoDB Atlas free M0). See README "Deploy free on Render".
 services:
   - type: web
     name: reposage
     runtime: docker
     dockerfilePath: ./Dockerfile
-    # The embedding model + torch need ~1-1.5 GB RAM; "starter" (512 MB) will OOM.
-    plan: standard
+    # Free: 512 MB RAM, 0.1 CPU, sleeps after 15 min idle, no disk (indexes are
+    # lost on sleep/redeploy). For always-on with persistent indexes use
+    # "starter" or higher and uncomment the disk below.
+    plan: free
     region: oregon
     healthCheckPath: /api/health
     autoDeploy: true
-    # Persists cloned repos, Chroma vectors and index metadata across deploys.
-    disk:
-      name: reposage-data
-      mountPath: /app/data
-      sizeGB: 5
+    # disk:
+    #   name: reposage-data
+    #   mountPath: /app/data
+    #   sizeGB: 5
     envVars:
       - key: MONGO_URI
         sync: false

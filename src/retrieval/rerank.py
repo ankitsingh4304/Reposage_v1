@@ -17,18 +17,26 @@ class RerankingRetriever:
         self.pool = pool or CONFIG.rerank_pool
 
     @cached_property
-    def _model(self):
-        from sentence_transformers import CrossEncoder
-
+    def _score(self):
         print(f"Loading reranker {self.model_name} ...")
-        return CrossEncoder(self.model_name)
+        try:
+            from fastembed.rerank.cross_encoder import TextCrossEncoder
+        except ImportError:
+            from sentence_transformers import CrossEncoder
+
+            model = CrossEncoder(self.model_name)
+            return lambda q, docs: model.predict([(q, d) for d in docs])
+        # fastembed ships the same model as an ONNX export under the Xenova namespace.
+        onnx_name = self.model_name.replace("cross-encoder/", "Xenova/")
+        model = TextCrossEncoder(onnx_name)
+        return lambda q, docs: list(model.rerank(q, docs))
 
     def retrieve(self, question: str, k: int | None = None) -> list[Hit]:
         k = k or CONFIG.top_k
         candidates = self.base.retrieve(question, self.pool)
         if not candidates:
             return []
-        scores = self._model.predict([(question, h.chunk.text) for h in candidates])
+        scores = self._score(question, [h.chunk.text for h in candidates])
         for h, s in zip(candidates, scores):
             h.score = float(s)
         candidates.sort(key=lambda h: h.score, reverse=True)

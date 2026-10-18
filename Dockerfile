@@ -29,16 +29,20 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# CPU-only torch keeps the image ~2 GB smaller than the default CUDA wheels.
-RUN pip install --index-url https://download.pytorch.org/whl/cpu torch
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 # Bake the embedding model into the image so cold starts don't download it.
-# BAAI/bge-m3 (~2.3 GB, needs ~4 GB RAM) also works but is a poor fit for small hosts.
+# Embeddings run on ONNX via fastembed (no torch), so the app fits in 512 MB.
 ARG EMBED_MODEL=sentence-transformers/all-MiniLM-L6-v2
-ENV EMBED_MODEL=${EMBED_MODEL}
-RUN python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['EMBED_MODEL'])"
+ENV EMBED_MODEL=${EMBED_MODEL} \
+    FASTEMBED_CACHE_PATH=/opt/hf-cache/fastembed
+# Memory-lean defaults for 512 MB / fractional-CPU hosts (peak ~380 MB while indexing).
+# Raise EMBED_BATCH_SIZE / EMBED_THREADS on bigger machines for faster indexing.
+ENV EMBED_BATCH_SIZE=8 \
+    EMBED_THREADS=1 \
+    MALLOC_ARENA_MAX=2
+RUN python -c "import os; from fastembed import TextEmbedding; TextEmbedding(os.environ['EMBED_MODEL'])"
 # tree-sitter-language-pack fetches grammars on first use; CHUNKER=treesitter needs python.
 RUN python -c "import tree_sitter_language_pack as t; t.download(['python'])"
 

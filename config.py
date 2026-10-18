@@ -37,7 +37,7 @@ class Config:
     rerank: bool = _get("RERANK", "0") in {"1", "true", "True"}
     rerank_pool: int = int(_get("RERANK_POOL", "12"))
 
-    llm_provider: str = _get("LLM_PROVIDER", "gemini")
+    llm_provider: str = _get("LLM_PROVIDER", "groq")
     llm_max_tokens: int = int(_get("LLM_MAX_TOKENS", "4096"))
 
     @property
