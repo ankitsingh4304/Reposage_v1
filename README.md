@@ -56,6 +56,36 @@ cd frontend && npm run build && cd ..
 uvicorn app.api:app          # serves the UI + API on http://localhost:8000
 ```
 
+## Docker
+
+The image builds the React UI and serves it from FastAPI on one port, with the
+embedding model (`all-MiniLM-L6-v2` by default) baked in. `docker-compose.yml`
+adds a local MongoDB.
+
+```bash
+cp .env.example .env        # set SECRET_KEY and one LLM key (e.g. GROQ_API_KEY)
+docker compose up --build   # http://localhost:8000
+```
+
+Cloned repos and Chroma vectors persist in the `reposage-data` volume (`/app/data`).
+Without an LLM key, sign-up, login and indexing still work; only asking fails.
+
+## Deploy to Render
+
+`render.yaml` defines one Docker web service with a persistent disk. MongoDB is
+hosted separately on MongoDB Atlas.
+
+1. Create a free MongoDB Atlas M0 cluster, add a database user, allow network
+   access from `0.0.0.0/0`, and copy the `mongodb+srv://...` connection string.
+2. Get an LLM key (Groq is the default: https://console.groq.com/keys).
+3. In Render: **New > Blueprint**, pick this repo. Fill in `MONGO_URI` and
+   `GROQ_API_KEY` when prompted (`SECRET_KEY` is generated; leave `FRONTEND_URL`
+   empty unless the UI is also hosted elsewhere).
+4. Wait for the deploy, then open `https://<service>.onrender.com` and sign up.
+
+The service needs the Standard plan (2 GB RAM) or larger and a disk, so it is not
+on Render's free tier. Health check: `GET /api/health`.
+
 CLI:
 
 ```bash
@@ -88,4 +118,7 @@ src/
 app/api.py           FastAPI backend
 frontend/            React (Vite) chat UI
 eval/                retrieval eval harness + datasets
+Dockerfile           production image (UI + API)
+docker-compose.yml   local stack with MongoDB
+render.yaml          Render Blueprint
 ```

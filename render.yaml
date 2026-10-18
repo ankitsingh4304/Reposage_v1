@@ -1,19 +1,29 @@
+# Render Blueprint: one Docker web service serving the API + React UI.
+# MongoDB is external (MongoDB Atlas free M0). See README "Deploy to Render".
 services:
   - type: web
-    name: reposage-backend
-    env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn app.api:app --host 0.0.0.0 --port $PORT"
+    name: reposage
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # The embedding model + torch need ~1-1.5 GB RAM; "starter" (512 MB) will OOM.
+    plan: standard
+    region: oregon
+    healthCheckPath: /api/health
+    autoDeploy: true
+    # Persists cloned repos, Chroma vectors and index metadata across deploys.
+    disk:
+      name: reposage-data
+      mountPath: /app/data
+      sizeGB: 5
     envVars:
-      - key: LLM_PROVIDER
-        value: "groq"
-      - key: GROQ_API_KEY
-        sync: false
       - key: MONGO_URI
         sync: false
       - key: SECRET_KEY
+        generateValue: true
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
         sync: false
+      # Only needed if you also host the frontend elsewhere (e.g. Vercel).
       - key: FRONTEND_URL
         sync: false
-      - key: PYTHON_VERSION
-        value: "3.10.0"
