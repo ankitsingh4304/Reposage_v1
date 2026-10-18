@@ -1,0 +1,25 @@
+# Mirrors main to a Hugging Face Space, which rebuilds the Docker image.
+# Setup (GitHub repo > Settings > Secrets and variables > Actions):
+#   secret   HF_TOKEN  = Hugging Face access token with "write" permission
+#   variable HF_SPACE  = <hf-username>/<space-name>, e.g. ankitsingh/reposage
+name: Sync to Hugging Face Space
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  sync:
+    if: ${{ vars.HF_SPACE != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Push to Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          git push --force "https://${HF_SPACE%%/*}:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" HEAD:main
