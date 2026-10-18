@@ -95,11 +95,88 @@ python -m src.cli ask "Where is the retry logic?" --agentic
 python -m src.cli chat
 ```
 
-Evaluate retrieval against a labeled set:
+Use `--user <name>` (before the command) to keep separate indexes side by side;
+the default is `cli`.
 
-```bash
-python -m src.cli eval eval/datasets/requests.json --label run1
-```
+## Evaluation
+
+Retrieval is measured against hand-labeled questions about
+[psf/requests](https://github.com/psf/requests) (80 indexed files), with
+ground-truth files verified by grepping the source:
+
+- `requests.json`: 25 precise questions, a mix of semantic ones and
+  exact-identifier ones.
+- `requests_vague.json`: 10 colloquial questions ("where's the cert stuff")
+  with the same ground truth.
+
+Metrics are at file level over the top 10 retrieved chunks:
+
+- **Hit@k**: the share of questions where a correct file appears in the top k.
+- **MRR**: the mean of 1 / rank of the first correct file.
+- **Recall@10**: the share of correct files found in the top 10.
+
+Reproduce all runs with `sh eval/run_matrix.sh`; results are written to
+`eval/results/`.
+
+**Precise questions (25)**
+
+| Embedder | Chunker | Retriever | Hit@1 | Hit@3 | Hit@5 | MRR | Recall@10 |
+|---|---|---|---|---|---|---|---|
+| MiniLM-L6 | recursive | dense | 0.52 | 0.88 | 1.00 | 0.706 | 1.00 |
+| MiniLM-L6 | recursive | dense + rerank | 0.40 | 0.96 | 0.96 | 0.660 | 1.00 |
+| MiniLM-L6 | recursive | hybrid | 0.60 | 0.92 | 1.00 | 0.773 | 1.00 |
+| MiniLM-L6 | recursive | hybrid + rerank | 0.36 | 0.88 | 1.00 | 0.615 | 1.00 |
+| MiniLM-L6 | tree-sitter | dense | 0.60 | 0.84 | 0.96 | 0.728 | 0.96 |
+| MiniLM-L6 | tree-sitter | dense + rerank | 0.44 | 0.88 | 0.96 | 0.647 | 0.96 |
+| MiniLM-L6 | tree-sitter | hybrid | 0.56 | 0.88 | 0.96 | 0.727 | 1.00 |
+| MiniLM-L6 | tree-sitter | hybrid + rerank | 0.44 | 0.84 | 1.00 | 0.658 | 1.00 |
+| BGE-M3 | recursive | dense | 0.48 | 0.96 | 1.00 | 0.701 | 1.00 |
+| BGE-M3 | recursive | dense + rerank | 0.40 | 0.96 | 1.00 | 0.650 | 1.00 |
+| **BGE-M3** | **recursive** | **hybrid** | **0.64** | **1.00** | **1.00** | **0.800** | **1.00** |
+| BGE-M3 | recursive | hybrid + rerank | 0.36 | 0.92 | 1.00 | 0.618 | 1.00 |
+
+**Vague questions (10)**
+
+| Embedder | Chunker | Retriever | Hit@1 | Hit@3 | Hit@5 | MRR | Recall@10 |
+|---|---|---|---|---|---|---|---|
+| MiniLM-L6 | recursive | dense | 0.30 | 0.90 | 1.00 | 0.542 | 1.00 |
+| MiniLM-L6 | recursive | dense + rerank | 0.30 | 0.80 | 1.00 | 0.578 | 1.00 |
+| **MiniLM-L6** | **recursive** | **hybrid** | **0.50** | 0.70 | 0.80 | **0.642** | 0.90 |
+| MiniLM-L6 | recursive | hybrid + rerank | 0.20 | 0.70 | 0.90 | 0.478 | 0.90 |
+| MiniLM-L6 | tree-sitter | dense | 0.40 | 0.50 | 1.00 | 0.548 | 1.00 |
+| MiniLM-L6 | tree-sitter | dense + rerank | 0.30 | 0.60 | 1.00 | 0.545 | 1.00 |
+| MiniLM-L6 | tree-sitter | hybrid | 0.30 | 0.60 | 0.80 | 0.493 | 0.90 |
+| MiniLM-L6 | tree-sitter | hybrid + rerank | 0.30 | 0.60 | 0.90 | 0.525 | 0.90 |
+| BGE-M3 | recursive | dense | 0.40 | 0.80 | 1.00 | 0.623 | 1.00 |
+| BGE-M3 | recursive | dense + rerank | 0.40 | 0.80 | 0.90 | 0.587 | 0.90 |
+| BGE-M3 | recursive | hybrid | 0.30 | 0.60 | 0.80 | 0.483 | 0.80 |
+| BGE-M3 | recursive | hybrid + rerank | 0.20 | 0.60 | 0.70 | 0.408 | 0.70 |
+
+What the numbers say:
+
+- **Hybrid search is the biggest win on precise questions.** Adding BM25 to dense
+  search (fused with RRF) raises MRR from 0.706 to 0.773 with MiniLM, and from
+  0.701 to 0.800 with BGE-M3. Hit@1 goes from 48% to 64% with BGE-M3. Exact
+  identifiers in the questions, like `HTTPDigestAuth` or `get_environ_proxies`,
+  are what keyword search is good at.
+- **A bigger embedder alone doesn't help much here.** Dense BGE-M3 (568M
+  parameters) scores about the same as dense MiniLM (22M parameters), at
+  0.701 vs 0.706 MRR. It pays off only in combination with hybrid search. The
+  hosted build uses MiniLM because it fits in a small container.
+- **The off-the-shelf reranker hurts.** `ms-marco-MiniLM-L-6-v2` is trained on
+  web search passages, not code, and lowered MRR in every setup. That's why
+  `RERANK` is off by default.
+- **Vague questions are where retrieval breaks down.** BM25 has no exact words
+  to match on colloquial queries: with BGE-M3, hybrid drops MRR from 0.623 to
+  0.483. This is the case the agent mode targets, since it grades the retrieved
+  code and rewrites the query. Agent mode needs an LLM key to evaluate:
+  `python -m src.cli --user eval-minilm eval eval/datasets/requests_vague.json --agentic --label vague_agentic`.
+- **Tree-sitter chunking is mixed.** Splitting along functions and classes
+  improves dense Hit@1 from 52% to 60%, but costs a little recall and doesn't
+  stack with hybrid search.
+
+These sets are small: one question is 4 points on the precise set and 10 points
+on the vague set. Read differences under about 0.04 MRR as noise.
 
 ## Layout
 
