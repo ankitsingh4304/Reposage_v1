@@ -95,12 +95,13 @@ def print_report(result: dict, label: str, compare_to: str | None = None) -> Non
 
 
 def run_cli(eval_path: str, label: str, retrieve_k: int, compare_to: str | None,
-            retriever: Retriever | None = None, agentic: bool = False) -> dict:
+            retriever: Retriever | None = None, agentic: bool = False,
+            user_id: str = "cli") -> dict:
     eval_set = load_eval_set(eval_path)
     if retriever is None:
         from src.pipeline.rag import RAGPipeline
 
-        pipeline = RAGPipeline()
+        pipeline = RAGPipeline(user_id)
         retriever = pipeline.agentic_retriever() if agentic else pipeline.retriever
     result = evaluate(retriever, eval_set, retrieve_k=retrieve_k)
     path = save_result(result, label)
