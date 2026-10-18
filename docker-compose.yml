@@ -1,0 +1,41 @@
+# Local production-like stack: RepoSage (API + UI) and MongoDB.
+#   cp .env.example .env   # add an LLM key, set SECRET_KEY
+#   docker compose up --build
+#   open http://localhost:8000
+
+services:
+  app:
+    build:
+      context: .
+    image: reposage:latest
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/reposage}
+      SECRET_KEY: ${SECRET_KEY:-change-me-local-dev-only}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8000}
+      PORT: 8000
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - reposage-data:/app/data
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  reposage-data:
+  mongo-data:
