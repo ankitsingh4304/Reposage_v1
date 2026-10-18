@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from datetime import datetime
@@ -82,9 +83,9 @@ class AskBody(BaseModel):
     agentic: bool = False
 
 
-@app.get("/")
-def root() -> dict:
-    return {"status": "ok", "docs": "/docs"}
+@app.get("/api/health")
+def health() -> dict:
+    return {"status": "ok"}
 
 
 @app.get("/api/status")
@@ -134,4 +135,19 @@ def ask(body: AskBody, user: models.User = Depends(auth.get_current_user)) -> di
 
 _DIST = ROOT / "frontend" / "dist"
 if _DIST.exists():
-    app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="static")
+    _DIST_ROOT = _DIST.resolve()
+    app.mount("/assets", StaticFiles(directory=str(_DIST / "assets")), name="assets")
+
+    # Client-side routes (e.g. /login) must fall back to index.html on refresh.
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(404, "Not Found")
+        file = (_DIST_ROOT / full_path).resolve()
+        if full_path and file.is_file() and _DIST_ROOT in file.parents:
+            return FileResponse(file)
+        return FileResponse(_DIST_ROOT / "index.html")
+else:
+    @app.get("/")
+    def root() -> dict:
+        return {"status": "ok", "docs": "/docs"}
