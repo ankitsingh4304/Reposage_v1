@@ -63,21 +63,31 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
 
 @router.post("/register", response_model=Token)
 def register(user: UserCreate):
-    if db.users.find_one({"email": user.email}):
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
+    email = user.email.strip().lower()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Please enter a valid email address.")
+    if len(user.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+    if len(user.password.encode()) > 72:
+        raise HTTPException(status_code=400, detail="Password must be at most 72 bytes.")
+    if db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="This email is already registered. Try logging in.")
+
     hashed_password = get_password_hash(user.password)
-    res = db.users.insert_one({"email": user.email, "hashed_password": hashed_password})
-    
+    db.users.insert_one({"email": email, "hashed_password": hashed_password,
+                         "created_at": datetime.utcnow()})
+
     access_token = create_access_token(
-        data={"sub": user.email}, 
+        data={"sub": email}, 
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user_doc = db.users.find_one({"email": form_data.username})
+    username = form_data.username.strip()
+    # older accounts may have been saved with capital letters
+    user_doc = db.users.find_one({"email": username}) or db.users.find_one({"email": username.lower()})
     if not user_doc or not verify_password(form_data.password, user_doc["hashed_password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -1,50 +1,117 @@
-import { useEffect, useRef, useState } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
-import { ArrowUp, Sparkles, LogOut } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Routes, Route, Navigate, useNavigate, useParams } from "react-router-dom";
+import { ArrowUp, Sparkles, Menu, AlertTriangle, RefreshCw, Bot } from "lucide-react";
 import Sidebar from "./components/Sidebar.jsx";
 import Message from "./components/Message.jsx";
+import Welcome from "./components/Welcome.jsx";
 import { Dots } from "./components/Loaders.jsx";
-import { getStatus, ingestRepo, askQuestion } from "./api.js";
+import {
+  getStatus, getMe, listChats, listRepos, getChat, ingestRepo, askQuestion,
+  renameChat, deleteChat, forgetRepo,
+} from "./api.js";
 import { useAuth } from "./AuthContext.jsx";
 import Login from "./Login.jsx";
-
-const STARTERS = [
-  "What does this project do?",
-  "Where is the entry point?",
-  "How is authentication handled?",
-  "Explain the main data flow.",
-];
+import { shortSource } from "./util.js";
 
 export default function App() {
   const { isAuthenticated } = useAuth();
+  const protectedEl = isAuthenticated ? <ChatApp /> : <Navigate to="/login" replace />;
   return (
     <Routes>
-      <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" />} />
-      <Route path="/" element={isAuthenticated ? <ChatApp /> : <Navigate to="/login" />} />
+      <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" replace />} />
+      <Route path="/" element={protectedEl} />
+      <Route path="/c/:chatId" element={protectedEl} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
 
 function ChatApp() {
-  const { logout } = useAuth();
+  const { chatId } = useParams();
+  const navigate = useNavigate();
+
+  const [me, setMe] = useState(null);
   const [status, setStatus] = useState(null);
+  const [chats, setChats] = useState([]);
+  const [repos, setRepos] = useState([]);
+  const [chat, setChat] = useState(null); // {id, title, repo} of the open chat
   const [messages, setMessages] = useState([]);
-  const [ingesting, setIngesting] = useState(false);
+  const [loadingChat, setLoadingChat] = useState(false);
+  const [chatError, setChatError] = useState("");
+
+  const [ingesting, setIngesting] = useState(null); // source being indexed
   const [ingestError, setIngestError] = useState("");
-  const [agentic, setAgentic] = useState(false);
+  const [agentic, setAgentic] = useState(() => localStorage.getItem("agentic") === "1");
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [waking, setWaking] = useState(false);
 
   const scrollRef = useRef(null);
   const anchorRef = useRef(null);
   const taRef = useRef(null);
-  const indexed = Boolean(status?.index);
+  const skipLoadRef = useRef(null); // chat id we just created; its messages are already on screen
+
+  const index = status?.index;
+  const indexed = Boolean(index);
+  const repoMismatch = Boolean(chat?.repo && index?.source && chat.repo !== index.source);
+  const canAsk = indexed && !asking && !ingesting && !repoMismatch;
   const lastUserIndex = messages.map((m) => m.role).lastIndexOf("user");
+
+  // ---- initial data ----
+  const refreshLists = useCallback(() => {
+    listChats().then(setChats).catch(() => {});
+    listRepos().then(setRepos).catch(() => {});
+    getMe().then(setMe).catch(() => {});
+  }, []);
 
   useEffect(() => {
     getStatus().then(setStatus).catch(() => {});
+    refreshLists();
+  }, [refreshLists]);
+
+  useEffect(() => {
+    const onSlow = (e) => setWaking(Boolean(e.detail));
+    window.addEventListener("api-slow", onSlow);
+    return () => window.removeEventListener("api-slow", onSlow);
   }, []);
 
+  useEffect(() => {
+    try { localStorage.setItem("agentic", agentic ? "1" : "0"); } catch { /* ignore */ }
+  }, [agentic]);
+
+  // ---- open a chat when the URL changes ----
+  useEffect(() => {
+    setSidebarOpen(false);
+    setChatError("");
+    if (!chatId) {
+      setChat(null);
+      setMessages([]);
+      return;
+    }
+    if (skipLoadRef.current === chatId) {
+      skipLoadRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    setLoadingChat(true);
+    getChat(chatId)
+      .then((c) => {
+        if (cancelled) return;
+        setChat({ id: c.id, title: c.title, repo: c.repo });
+        setMessages(c.messages);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setChat(null);
+        setMessages([]);
+        setChatError(e.message);
+      })
+      .finally(() => !cancelled && setLoadingChat(false));
+    return () => { cancelled = true; };
+  }, [chatId]);
+
+  // ---- composer autosize + scroll ----
   useEffect(() => {
     const el = taRef.current;
     if (el) {
@@ -57,41 +124,73 @@ function ChatApp() {
     if (anchorRef.current) {
       anchorRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
     } else {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
     }
   }, [messages.length]);
 
-  async function handleIngest(source) {
-    setIngesting(true);
+  // ---- actions ----
+  async function handleIngest(source, { startNewChat = true } = {}) {
+    setIngesting(source);
     setIngestError("");
     try {
       const res = await ingestRepo(source);
       setStatus((s) => ({ ...s, index: res.index }));
-      setMessages([]);
+      refreshLists();
+      if (startNewChat) navigate("/");
+      return true;
     } catch (e) {
       setIngestError(e.message);
+      return false;
     } finally {
-      setIngesting(false);
+      setIngesting(null);
     }
   }
 
   async function submit(text) {
     const q = text.trim();
-    if (!q || asking || !indexed) return;
+    if (!q || !canAsk) return;
     setQuestion("");
     setMessages((m) => [...m, { role: "user", content: q }]);
     setAsking(true);
     try {
-      const res = await askQuestion(q, agentic);
+      const res = await askQuestion(q, agentic, chat?.id);
       setMessages((m) => [
         ...m,
         { role: "assistant", content: res.text, sources: res.sources, trace: res.trace },
       ]);
+      const conv = res.conversation;
+      if (conv && conv.id !== chat?.id) {
+        skipLoadRef.current = conv.id;
+        setChat({ id: conv.id, title: conv.title, repo: conv.repo });
+        navigate(`/c/${conv.id}`, { replace: !chat });
+      }
+      if (conv) {
+        setChats((list) => [conv, ...list.filter((c) => c.id !== conv.id)]);
+        if (!chat) getMe().then(setMe).catch(() => {});
+      }
     } catch (e) {
       setMessages((m) => [...m, { role: "assistant", content: e.message, error: true }]);
     } finally {
       setAsking(false);
     }
+  }
+
+  async function handleRename(id, title) {
+    const updated = await renameChat(id, title);
+    setChats((list) => list.map((c) => (c.id === id ? { ...c, title: updated.title } : c)));
+    if (chat?.id === id) setChat((c) => ({ ...c, title: updated.title }));
+  }
+
+  async function handleDelete(id) {
+    await deleteChat(id);
+    setChats((list) => list.filter((c) => c.id !== id));
+    getMe().then(setMe).catch(() => {});
+    if (chat?.id === id) navigate("/");
+  }
+
+  async function handleForgetRepo(source) {
+    await forgetRepo(source);
+    setRepos((list) => list.filter((r) => r.source !== source));
   }
 
   function onKeyDown(e) {
@@ -101,38 +200,76 @@ function ChatApp() {
     }
   }
 
+  const placeholder = !indexed
+    ? "Index a repository to start chatting"
+    : repoMismatch
+      ? "Re-index this chat's repository to continue"
+      : chat
+        ? "Ask a follow-up…"
+        : `Ask anything about ${shortSource(index.source)}…`;
+
   return (
-    <div className="app">
+    <div className={"app" + (sidebarOpen ? " sidebar-open" : "")}>
       <Sidebar
+        me={me}
         status={status}
+        chats={chats}
+        repos={repos}
+        activeChatId={chat?.id}
         ingesting={ingesting}
         ingestError={ingestError}
         onIngest={handleIngest}
-        agentic={agentic}
-        setAgentic={setAgentic}
-        onClear={() => setMessages([])}
-        hasMessages={messages.length > 0}
-      >
-        <div style={{ marginTop: 'auto', padding: '10px' }}>
-          <button onClick={logout} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <LogOut size={16} /> Logout
-          </button>
-        </div>
-      </Sidebar>
+        onForgetRepo={handleForgetRepo}
+        onNewChat={() => navigate("/")}
+        onOpenChat={(id) => navigate(`/c/${id}`)}
+        onRenameChat={handleRename}
+        onDeleteChat={handleDelete}
+        onClose={() => setSidebarOpen(false)}
+      />
+      <div className="scrim" onClick={() => setSidebarOpen(false)} />
 
       <main className="chat">
+        <header className="topbar">
+          <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
+            <Menu size={18} />
+          </button>
+          <div className="topbar-title">{chat?.title || "New chat"}</div>
+          {(chat?.repo || index?.source) && (
+            <span className={"repo-chip" + (repoMismatch ? " warn" : "")} title={chat?.repo || index?.source}>
+              {shortSource(chat?.repo || index?.source)}
+            </span>
+          )}
+        </header>
+
+        {waking && (
+          <div className="waking">
+            <Dots /> Waking up the server… on the free plan this can take up to a minute.
+          </div>
+        )}
+
         <div className="chat-scroll" ref={scrollRef}>
           <div className="chat-inner">
-            {messages.length === 0 ? (
+            {loadingChat ? (
+              <div className="chat-loading"><Dots /> Loading chat…</div>
+            ) : chatError ? (
+              <div className="empty-note">
+                <AlertTriangle size={18} /> {chatError}
+              </div>
+            ) : messages.length === 0 ? (
               <Welcome
-                indexed={indexed}
-                source={status?.index?.source}
+                me={me}
+                index={index}
+                statusLoaded={status !== null}
+                ingesting={ingesting}
                 onPick={submit}
+                onIngest={handleIngest}
+                recentChats={chats.slice(0, 3)}
+                onOpenChat={(id) => navigate(`/c/${id}`)}
               />
             ) : (
               messages.map((m, i) => (
                 <div
-                  key={i}
+                  key={m.id || i}
                   ref={i === lastUserIndex ? anchorRef : null}
                   className={i === lastUserIndex ? "turn-anchor" : undefined}
                 >
@@ -155,67 +292,57 @@ function ChatApp() {
         </div>
 
         <div className="composer-wrap">
-          <div className="composer">
+          {repoMismatch && (
+            <div className="mismatch">
+              <AlertTriangle size={16} />
+              <span>
+                This chat is about <b>{shortSource(chat.repo)}</b>, but your current index is{" "}
+                <b>{shortSource(index.source)}</b>.
+              </span>
+              <button
+                className="btn-small"
+                disabled={Boolean(ingesting)}
+                onClick={() => handleIngest(chat.repo, { startNewChat: false })}
+              >
+                <RefreshCw size={13} /> {ingesting ? "Indexing…" : "Re-index"}
+              </button>
+            </div>
+          )}
+          <div className={"composer" + (canAsk ? "" : " disabled")}>
             <textarea
               ref={taRef}
               rows={1}
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder={indexed ? "Ask anything about this codebase…" : "Index a repository to start chatting"}
-              disabled={!indexed || asking}
+              placeholder={placeholder}
+              disabled={!canAsk}
             />
             <button
               className="send"
               onClick={() => submit(question)}
-              disabled={!indexed || asking || !question.trim()}
+              disabled={!canAsk || !question.trim()}
               aria-label="Send"
             >
               <ArrowUp size={18} />
             </button>
           </div>
-          <p className="composer-hint">
-            Answers are grounded in the indexed code with <code>file:line</code> citations.
-          </p>
+          <div className="composer-foot">
+            <button
+              type="button"
+              className={"agent-toggle" + (agentic ? " on" : "")}
+              onClick={() => setAgentic((v) => !v)}
+              aria-pressed={agentic}
+              title="Grades the retrieved code and rewrites the search if it's weak. Slower, often better."
+            >
+              <Bot size={14} /> Agent mode {agentic ? "on" : "off"}
+            </button>
+            <span className="composer-hint">
+              Answers cite the code as <code>file:line</code>
+            </span>
+          </div>
         </div>
       </main>
     </div>
   );
-}
-
-function Welcome({ indexed, source, onPick }) {
-  return (
-    <div className="welcome">
-      <div className="welcome-badge">
-        <Sparkles size={14} /> Codebase RAG
-      </div>
-      <h1>
-        Chat with a <span className="accent">Codebase</span>
-      </h1>
-      <p className="welcome-sub">
-        {indexed ? (
-          <>
-            Indexed <b>{shortSource(source)}</b>. Ask a question below and get answers
-            grounded in the real source, with clickable <code>file:line</code> citations.
-          </>
-        ) : (
-          <>Point it at any GitHub repo from the panel on the left, then ask away.</>
-        )}
-      </p>
-      {indexed && (
-        <div className="starters">
-          {STARTERS.map((s) => (
-            <button key={s} onClick={() => onPick(s)}>
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function shortSource(source) {
-  if (!source) return "the repository";
-  return source.replace(/\.git$/, "").split("/").slice(-2).join("/");
 }

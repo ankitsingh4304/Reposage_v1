@@ -31,6 +31,35 @@ def format_context(hits: list[Hit]) -> str:
     return "\n\n".join(f"--- {h.chunk.citation()} ---\n{h.chunk.text}" for h in hits)
 
 
+def format_history(history: list[dict] | None, max_chars: int = 600) -> str:
+    """Earlier turns of the chat, trimmed, so follow-up questions make sense."""
+    if not history:
+        return ""
+    lines = []
+    for turn in history:
+        who = "User" if turn.get("role") == "user" else "Assistant"
+        text = (turn.get("content") or "").strip()
+        if len(text) > max_chars:
+            text = text[:max_chars] + " ..."
+        lines.append(f"{who}: {text}")
+    return "Earlier in this conversation:\n" + "\n\n".join(lines) + "\n\n"
+
+
+def build_user_prompt(question: str, hits: list[Hit], history: list[dict] | None = None) -> str:
+    return (f"{format_history(history)}Code context:\n\n{format_context(hits)}\n\n"
+            f"Question: {question}")
+
+
+def retrieval_query(question: str, history: list[dict] | None) -> str:
+    # A follow-up like "and where is that tested?" retrieves better with the
+    # previous question attached.
+    if history:
+        prev = [t["content"] for t in history if t.get("role") == "user" and t.get("content")]
+        if prev:
+            return f"{prev[-1]}\n{question}"
+    return question
+
+
 class RepoTooLargeError(ValueError):
     pass
 
@@ -99,19 +128,20 @@ class RAGPipeline:
         print(f"Done. Collection now holds {self.store.count()} chunks.")
         return len(chunks)
 
-    def answer(self, question: str, k: int | None = None) -> Answer:
-        hits = self.retriever.retrieve(question, k or CONFIG.top_k)
+    def answer(self, question: str, k: int | None = None,
+               history: list[dict] | None = None) -> Answer:
+        hits = self.retriever.retrieve(retrieval_query(question, history), k or CONFIG.top_k)
         if not hits:
             return Answer(text="The index is empty. Run `ingest` first.", sources=[])
-        user = f"Code context:\n\n{format_context(hits)}\n\nQuestion: {question}"
+        user = build_user_prompt(question, hits, history)
         return Answer(text=self.llm.complete(SYSTEM_PROMPT, user), sources=hits)
 
-    def answer_agentic(self, question: str) -> Answer:
+    def answer_agentic(self, question: str, history: list[dict] | None = None) -> Answer:
         if self._agent is None:
             from src.agent.graph import AgenticRAG
 
             self._agent = AgenticRAG(self.retriever, self.llm)
-        return self._agent.answer(question)
+        return self._agent.answer(question, history=history)
 
     def agentic_retriever(self):
         from src.agent.agentic import AgenticRetriever

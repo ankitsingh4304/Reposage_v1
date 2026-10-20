@@ -22,7 +22,7 @@ from src.ingest.loader import normalize_github_url
 from src.pipeline.rag import RAGPipeline, RepoTooLargeError
 from src.storage.index_meta import read_index_meta
 
-from app import models, auth
+from app import models, auth, history
 from app.database import db
 
 app = FastAPI(title="Chat with a Codebase")
@@ -42,6 +42,15 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(history.router)
+
+
+@app.on_event("startup")
+def _create_indexes() -> None:
+    try:
+        history.ensure_indexes()
+    except Exception as e:  # don't block startup on a slow database
+        print(f"Could not create MongoDB indexes: {e}")
 
 # Recently active users keep a ready pipeline. The models inside are shared, so each
 # entry only costs that user's keyword index; the oldest entry is dropped past the cap.
@@ -93,6 +102,7 @@ class IngestBody(BaseModel):
 class AskBody(BaseModel):
     question: str
     agentic: bool = False
+    conversation_id: str | None = None  # empty = start a new chat
 
 
 @app.get("/api/health")
@@ -124,7 +134,10 @@ def ingest(body: IngestBody, user: models.User = Depends(auth.get_current_user))
         raise HTTPException(500, f"{type(e).__name__}: {e}")
     finally:
         _ingest_lock.release()
-    return {"n_chunks": n, "index": read_index_meta(user.id)}
+    meta = read_index_meta(user.id)
+    if meta:
+        history.remember_repo(user.id, meta)
+    return {"n_chunks": n, "index": meta}
 
 
 @app.post("/api/ask")
@@ -132,27 +145,24 @@ def ask(body: AskBody, user: models.User = Depends(auth.get_current_user)) -> di
     question = body.question.strip()
     if not question:
         raise HTTPException(400, "Question is required.")
-    if read_index_meta(user.id) is None:
+    meta = read_index_meta(user.id)
+    if meta is None:
         raise HTTPException(409, "No repository indexed yet.")
+    chat = history.get_owned_chat(body.conversation_id, user.id) if body.conversation_id else None
+    past = history.recent_history(chat["_id"]) if chat else None
     try:
         pipe = pipeline(user.id)
-        ans = pipe.answer_agentic(question) if body.agentic else pipe.answer(question)
-        
-        db.chat_history.insert_one({
-            "user_id": user.id,
-            "question": question,
-            "answer": ans.text,
-            "sources": [s.chunk.citation() for s in ans.sources],
-            "timestamp": datetime.utcnow()
-        })
-        
+        ans = (pipe.answer_agentic(question, history=past) if body.agentic
+               else pipe.answer(question, history=past))
     except Exception as e:
         raise HTTPException(500, f"{type(e).__name__}: {e}")
-    return {
+    result = {
         "text": ans.text,
         "sources": [serialize(h) for h in ans.sources],
         "trace": ans.trace,
     }
+    chat = history.save_exchange(user.id, chat, question, meta.get("source"), result)
+    return {**result, "conversation": history.chat_summary(chat)}
 
 
 _DIST = ROOT / "frontend" / "dist"
