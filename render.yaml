@@ -45,8 +45,12 @@ services:
         value: "0"                   # the reranker lowered scores in the eval, and costs RAM
       - key: EMBED_THREADS
         value: "1"
+      # Small batches keep embedding under the 512 MB limit (16 ran out of memory).
       - key: EMBED_BATCH_SIZE
-        value: "16"
+        value: "2"
+      # Fewer glibc memory arenas = less wasted memory in a multi-threaded Python app.
+      - key: MALLOC_ARENA_MAX
+        value: "2"
       - key: MAX_INGEST_CHUNKS
         value: "3000"
       - key: MAX_CACHED_PIPELINES
