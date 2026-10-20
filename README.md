@@ -20,8 +20,8 @@ rewrites the query to retry when the first attempt is weak.
 
 ## Stack
 
-- Embeddings: BGE-M3 (local) via `sentence-transformers`, or a smaller MiniLM model
-- Vector store: Chroma
+- Embeddings: `bge-small-en-v1.5` via FastEmbed (ONNX, no PyTorch, fits in 512 MB)
+- Vector store: Qdrant (Qdrant Cloud when deployed, local mode in dev)
 - Retrieval: dense + BM25 hybrid (RRF), cross-encoder reranker
 - Chunking: language-aware splitter, optional tree-sitter
 - LLM: any OpenAI-compatible provider (Gemini / Groq / OpenRouter) or Claude
@@ -37,6 +37,7 @@ python -m venv .venv
 pip install -r requirements.txt
 
 copy .env.example .env      # add one provider's API key
+python scripts/download_models.py   # optional: fetch the embedding model now
 
 cd frontend
 npm install
@@ -68,7 +69,7 @@ uvicorn app.api:app          # serves the UI + API on http://localhost:8000
 ## Docker
 
 The image builds the React UI and serves it from FastAPI on one port, with the
-embedding model (`all-MiniLM-L6-v2` by default) baked in. `docker-compose.yml`
+embedding model (`bge-small-en-v1.5` by default) baked in. `docker-compose.yml`
 adds a local MongoDB.
 
 ```bash
@@ -76,52 +77,57 @@ cp .env.example .env        # set SECRET_KEY and one LLM key (e.g. GROQ_API_KEY)
 docker compose up --build   # http://localhost:8000
 ```
 
-Cloned repos and Chroma vectors persist in the `reposage-data` volume (`/app/data`).
+With `QDRANT_URL` empty, vectors are kept by local Qdrant in the `reposage-data`
+volume (`/app/data`).
 Without an LLM key, sign-up, login and indexing still work; only asking fails.
 
-## Deploy free on Hugging Face Spaces
+## Deploy free on Render
 
-The free "CPU basic" Space (2 vCPU, 16 GB RAM) runs the Docker image as-is. The
-YAML block at the top of this README is the Space config. The Space disk isn't
-persistent, so indexed repos are lost when the Space restarts or sleeps (after
-48 hours with no visitors), and users simply re-index. Accounts and chat history
-are kept in MongoDB Atlas.
+Five free services work together:
 
-1. MongoDB Atlas: create a free M0 cluster and a database user, allow network
-   access from `0.0.0.0/0`, and copy the `mongodb+srv://...` string.
-2. Hugging Face: **New Space**, SDK **Docker** (blank template), hardware
-   **CPU basic (free)**, visibility Public.
-3. In the Space, go to **Settings > Variables and secrets** and add the secrets
-   `MONGO_URI`, `SECRET_KEY` (any long random string) and `GROQ_API_KEY`.
-4. Push this repo to the Space. Either do it once by hand:
+| Piece | Service | Holds |
+|---|---|---|
+| Backend (FastAPI) | Render web service, free plan | nothing permanent |
+| Frontend (React) | Render static site, free | the built UI |
+| Vectors | Qdrant Cloud free cluster | code chunks + embeddings |
+| Users, chat history, index info | MongoDB Atlas free M0 | accounts and data |
+| Answers | Groq API | — |
 
-   ```bash
-   git remote add space https://huggingface.co/spaces/<hf-user>/<space-name>
-   git push --force space main   # password = HF access token with write permission
-   ```
+Render's free server wipes its disk on every restart, so everything that must
+survive lives in Qdrant Cloud and MongoDB Atlas.
 
-   or let `.github/workflows/sync-hf-space.yml` push on every commit to `main`
-   (add the repo secret `HF_TOKEN` and the variable `HF_SPACE=<hf-user>/<space-name>`
-   in GitHub, then re-run the workflow from the Actions tab).
-5. After the build finishes, open `https://<hf-user>-<space-name>.hf.space`.
-   Use that direct URL, not the huggingface.co page, because the embedded
-   iframe can block the login token in some browsers.
+1. **MongoDB Atlas** (https://cloud.mongodb.com): create a free M0 cluster, add a
+   database user, and under **Network Access** allow `0.0.0.0/0` (Render's address
+   changes). Copy the `mongodb+srv://...` connection string.
+2. **Qdrant Cloud** (https://cloud.qdrant.io): create a free cluster. Copy its
+   **Cluster URL** (ends in `:6333`) and create an **API key**.
+3. **Groq** (https://console.groq.com/keys): create an API key.
+4. Push this repo to GitHub.
+5. **Render**: **New > Blueprint**, pick the repo. Render reads `render.yaml` and
+   creates two services, `reposage-api` and `reposage-ui`. Fill in when asked:
+   - `MONGO_URI`, `QDRANT_URL`, `QDRANT_API_KEY`, `GROQ_API_KEY`
+   - `FRONTEND_URL` = `https://reposage-ui.onrender.com`
+   - `VITE_API_URL` = `https://reposage-api.onrender.com`
 
-## Deploy to Render (paid)
+   `SECRET_KEY` is generated for you.
+6. When both deploys finish, check the real URLs on each service's page. If Render
+   added a suffix (because the name was taken), fix `FRONTEND_URL` on the API and
+   `VITE_API_URL` on the UI, then redeploy the UI (Vite bakes the URL in at build
+   time).
+7. Open the UI URL, sign up, and index a repo.
 
-`render.yaml` defines one Docker web service with a persistent disk. MongoDB is
-hosted separately on MongoDB Atlas.
+Free-plan limits:
 
-1. Create a free MongoDB Atlas M0 cluster, add a database user, allow network
-   access from `0.0.0.0/0`, and copy the `mongodb+srv://...` connection string.
-2. Get an LLM key (Groq is the default: https://console.groq.com/keys).
-3. In Render: **New > Blueprint**, pick this repo. Fill in `MONGO_URI` and
-   `GROQ_API_KEY` when prompted (`SECRET_KEY` is generated; leave `FRONTEND_URL`
-   empty unless the UI is also hosted elsewhere).
-4. Wait for the deploy, then open `https://<service>.onrender.com` and sign up.
+- The API sleeps after 15 minutes with no traffic; the next request waits about a
+  minute while it wakes.
+- 0.1 CPU makes indexing slow, so repos over `MAX_INGEST_CHUNKS` (3000) are refused
+  and only one repo is indexed at a time.
+- A free Qdrant cluster is suspended after a week unused and deleted after four.
 
-The service needs the Standard plan (2 GB RAM) or larger and a disk, so it is not
-on Render's free tier. Health check: `GET /api/health`.
+Health check: `GET /api/health`.
+
+> Hugging Face Spaces is not a good fit: Spaces only allow outgoing connections on
+> ports 80, 443 and 8080, and MongoDB Atlas uses 27017, so login would fail.
 
 CLI:
 
@@ -153,7 +159,9 @@ Metrics are at file level over the top 10 retrieved chunks:
 - **Recall@10**: the share of correct files found in the top 10.
 
 Reproduce all runs with `sh eval/run_matrix.sh`; results are written to
-`eval/results/`.
+`eval/results/`. The tables below were measured with the earlier stack
+(sentence-transformers + Chroma, including BGE-M3); the script now runs MiniLM and
+bge-small through FastEmbed + Qdrant, so new numbers will differ somewhat.
 
 **Precise questions (25)**
 

@@ -12,7 +12,11 @@ if str(ROOT) not in sys.path:
 import streamlit as st
 
 from config import CONFIG
-from src.pipeline.rag import RAGPipeline, read_index_meta
+from src.pipeline.rag import RAGPipeline
+from src.storage.index_meta import read_index_meta
+
+# Streamlit has no login, so it uses one shared index namespace.
+USER_ID = "streamlit"
 
 st.set_page_config(page_title="Chat with a Codebase", page_icon="💬", layout="wide")
 
@@ -107,7 +111,7 @@ THINKING = """
 
 @st.cache_resource(show_spinner=False)
 def get_pipeline() -> RAGPipeline:
-    return RAGPipeline()
+    return RAGPipeline(USER_ID)
 
 
 def render_header() -> None:
@@ -121,7 +125,7 @@ def render_header() -> None:
 
 def render_index_bar() -> None:
     st.markdown('<div class="section-label">Repository</div>', unsafe_allow_html=True)
-    meta = read_index_meta()
+    meta = read_index_meta(USER_ID)
     if meta:
         st.markdown(
             f'<span class="chip"><span class="dot"></span>{meta["source"]}</span>'
@@ -198,7 +202,7 @@ def main() -> None:
     render_header()
     render_index_bar()
 
-    if read_index_meta() is None:
+    if read_index_meta(USER_ID) is None:
         st.info("Index a repository above to start chatting.")
         return
 

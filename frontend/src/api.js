@@ -1,13 +1,22 @@
+// Empty = same server as the UI. On Render the UI is a separate static site, so
+// VITE_API_URL is set to the backend URL at build time.
+const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
+
 async function request(path, options = {}) {
   const token = localStorage.getItem("token");
-  const apiUrl = import.meta.env.VITE_API_URL || "";
   const headers = {
     ...options.headers,
     ...(token ? { Authorization: `Bearer ${token}` } : {})
   };
   
-  const res = await fetch(`${apiUrl}${path}`, { ...options, headers });
+  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
   const data = await res.json().catch(() => ({}));
+  // Login expired or invalid: clear it and go back to the login page.
+  if (res.status === 401 && token && !path.startsWith("/api/auth/")) {
+    localStorage.removeItem("token");
+    window.location.assign("/login");
+    throw new Error("Your session expired. Please log in again.");
+  }
   if (!res.ok) {
     throw new Error(data.detail || `Request failed (${res.status})`);
   }

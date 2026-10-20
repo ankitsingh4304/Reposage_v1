@@ -31,13 +31,16 @@ class HybridRetriever:
         self.rrf_k = rrf_k
         self.pool = pool or CONFIG.retrieve_k
         self._chunks: list[Chunk] = store.all_chunks()
-        self._bm25 = BM25Okapi([tokenize(c.text) for c in self._chunks])
+        # BM25Okapi divides by the corpus size, so it can't be built for an empty index.
+        self._bm25 = BM25Okapi([tokenize(c.text) for c in self._chunks]) if self._chunks else None
 
     def retrieve(self, question: str, k: int | None = None) -> list[Hit]:
         k = k or CONFIG.top_k
 
         dense_hits = self.store.search(self.embedder.embed_query(question), self.pool)
 
+        if self._bm25 is None:
+            return dense_hits[:k]
         scores = self._bm25.get_scores(tokenize(question))
         top_idx = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[: self.pool]
 

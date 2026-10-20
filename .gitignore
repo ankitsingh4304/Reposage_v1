@@ -27,3 +27,6 @@ frontend/dist/
 .DS_Store
 Thumbs.db
 Untitled
+
+# FastEmbed model files (downloaded by scripts/download_models.py)
+models/

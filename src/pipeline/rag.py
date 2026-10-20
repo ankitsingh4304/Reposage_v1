@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 
-from config import CONFIG, DATA_DIR
-from src.embeddings.bge import BGEEmbedder
+from config import CONFIG
+from src.embeddings.fast import get_embedder
 from src.ingest.chunk_factory import chunk_files
-from src.ingest.loader import load_repo
+from src.ingest.loader import cleanup_clone, load_repo
 from src.llm.factory import make_llm
 from src.retrieval.factory import make_retriever
-from src.store.chroma_store import ChromaStore
+from src.storage.index_meta import delete_index_meta, read_index_meta, write_index_meta
+from src.store.qdrant_store import QdrantStore
 from src.types import Hit
 
 SYSTEM_PROMPT = """You are a precise codebase assistant. Answer the user's question \
@@ -31,15 +31,8 @@ def format_context(hits: list[Hit]) -> str:
     return "\n\n".join(f"--- {h.chunk.citation()} ---\n{h.chunk.text}" for h in hits)
 
 
-def get_index_meta_path(user_id: int | str):
-    return DATA_DIR / f"index_{user_id}.json"
-
-def read_index_meta(user_id: int | str) -> dict | None:
-    path = get_index_meta_path(user_id)
-    if path.exists():
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    return None
+class RepoTooLargeError(ValueError):
+    pass
 
 
 class RAGPipeline:
@@ -51,22 +44,40 @@ class RAGPipeline:
             embed_model = None
         else:
             embed_model = meta.get("embed_model") if meta else None
-        self.embedder = BGEEmbedder(model_name=embed_model)
-        self.store = ChromaStore(collection_name=f"user_{user_id}")
-        self.retriever = make_retriever(self.embedder, self.store)
+        # Shared across users: one model in memory, not one per user.
+        self.embedder = get_embedder(embed_model)
+        self.store = QdrantStore(user_id, dim=self.embedder.dim)
         self.llm = make_llm()
+        self._agent = None
+        self.retriever = make_retriever(self.embedder, self.store)
+
+    def _rebuild_retriever(self) -> None:
+        # Hybrid search keeps a keyword index of the chunks in memory; rebuild it
+        # after an ingest so it sees the new repo.
+        self.retriever = make_retriever(self.embedder, self.store)
+        self._agent = None
 
     def ingest(self, source: str, reset: bool = True) -> int:
-        if reset:
-            self.store.reset()
-
         print(f"Loading {source} ...")
-        files = load_repo(source)
+        try:
+            files = load_repo(source)
+        finally:
+            cleanup_clone(source)  # file texts are in memory now; free the disk
         print(f"  {len(files)} files")
 
         print("Chunking ...")
         chunks = chunk_files(files)
         print(f"  {len(chunks)} chunks")
+        if CONFIG.max_ingest_chunks and len(chunks) > CONFIG.max_ingest_chunks:
+            raise RepoTooLargeError(
+                f"This repo splits into {len(chunks)} chunks; this server's limit is "
+                f"{CONFIG.max_ingest_chunks}. Try a smaller repo."
+            )
+
+        if reset:
+            # If embedding fails halfway, show "no repo indexed" instead of a stale name.
+            delete_index_meta(self.user_id)
+            self.store.reset()
 
         print("Embedding + storing ...")
         batch = CONFIG.embed_batch_size
@@ -83,10 +94,8 @@ class RAGPipeline:
             "n_chunks": len(chunks),
             "count": self.store.count(),
         }
-        meta_path = get_index_meta_path(self.user_id)
-        meta_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2)
+        write_index_meta(self.user_id, meta)
+        self._rebuild_retriever()
         print(f"Done. Collection now holds {self.store.count()} chunks.")
         return len(chunks)
 
@@ -98,7 +107,7 @@ class RAGPipeline:
         return Answer(text=self.llm.complete(SYSTEM_PROMPT, user), sources=hits)
 
     def answer_agentic(self, question: str) -> Answer:
-        if getattr(self, "_agent", None) is None:
+        if self._agent is None:
             from src.agent.graph import AgenticRAG
 
             self._agent = AgenticRAG(self.retriever, self.llm)

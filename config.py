@@ -11,8 +11,13 @@ load_dotenv()
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 REPOS_DIR = DATA_DIR / "repos"
-CHROMA_DIR = DATA_DIR / "chroma"
-INDEX_META = DATA_DIR / "index_meta.json"
+# Used only when QDRANT_URL is empty: Qdrant then runs in-process and stores vectors here.
+QDRANT_LOCAL_DIR = DATA_DIR / "qdrant"
+# Index info per user, used only when MONGO_URI is empty (CLI / local runs).
+INDEX_META_DIR = DATA_DIR
+# FastEmbed model files. Downloaded at build time (scripts/download_models.py) so the
+# server doesn't fetch them on every cold start.
+MODELS_DIR = Path(os.environ.get("FASTEMBED_CACHE_PATH", str(ROOT / "models")))
 
 
 def _get(name: str, default: str) -> str:
@@ -21,10 +26,18 @@ def _get(name: str, default: str) -> str:
 
 @dataclass(frozen=True)
 class Config:
-    embed_model: str = _get("EMBED_MODEL", "BAAI/bge-m3")
-    embed_batch_size: int = int(_get("EMBED_BATCH_SIZE", "32"))
+    # FastEmbed (ONNX, no PyTorch) keeps memory low enough for a 512 MB server.
+    embed_model: str = _get("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+    embed_batch_size: int = int(_get("EMBED_BATCH_SIZE", "16"))
+    embed_threads: int = int(_get("EMBED_THREADS", "1"))
 
-    collection_name: str = _get("COLLECTION_NAME", "codebase")
+    # Qdrant: empty URL = local in-process mode (data/qdrant), handy for dev and the CLI.
+    qdrant_url: str = _get("QDRANT_URL", "")
+    qdrant_api_key: str = _get("QDRANT_API_KEY", "")
+    collection_name: str = _get("QDRANT_COLLECTION", "reposage_chunks")
+
+    # Protects a small server from repos that would take too long to embed.
+    max_ingest_chunks: int = int(_get("MAX_INGEST_CHUNKS", "3000"))
 
     chunker: str = _get("CHUNKER", "recursive")            # recursive | treesitter
     chunk_size: int = int(_get("CHUNK_SIZE", "1200"))
@@ -32,12 +45,12 @@ class Config:
 
     top_k: int = int(_get("TOP_K", "8"))
     retrieve_k: int = int(_get("RETRIEVE_K", "40"))
-    retriever: str = _get("RETRIEVER", "dense")            # dense | hybrid
+    retriever: str = _get("RETRIEVER", "hybrid")           # dense | hybrid
     agent_max_rewrites: int = int(_get("AGENT_MAX_REWRITES", "2"))
     rerank: bool = _get("RERANK", "0") in {"1", "true", "True"}
     rerank_pool: int = int(_get("RERANK_POOL", "12"))
 
-    llm_provider: str = _get("LLM_PROVIDER", "gemini")
+    llm_provider: str = _get("LLM_PROVIDER", "groq")
     llm_max_tokens: int = int(_get("LLM_MAX_TOKENS", "4096"))
 
     @property

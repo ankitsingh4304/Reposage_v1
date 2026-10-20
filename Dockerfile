@@ -20,6 +20,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     HF_HOME=/opt/hf-cache \
     XDG_CACHE_HOME=/opt/cache \
+    FASTEMBED_CACHE_PATH=/opt/models \
     TOKENIZERS_PARALLELISM=false
 
 # git is required at runtime to clone repositories for ingestion.
@@ -29,20 +30,17 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# CPU-only torch keeps the image ~2 GB smaller than the default CUDA wheels.
-RUN pip install --index-url https://download.pytorch.org/whl/cpu torch
+# No PyTorch: FastEmbed runs the embedding model on ONNX Runtime.
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 # Bake the embedding model into the image so cold starts don't download it.
-# BAAI/bge-m3 (~2.3 GB, needs ~4 GB RAM) also works but is a poor fit for small hosts.
-ARG EMBED_MODEL=sentence-transformers/all-MiniLM-L6-v2
+ARG EMBED_MODEL=BAAI/bge-small-en-v1.5
 ENV EMBED_MODEL=${EMBED_MODEL}
-RUN python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['EMBED_MODEL'])"
-# tree-sitter-language-pack fetches grammars on first use; CHUNKER=treesitter needs python.
-RUN python -c "import tree_sitter_language_pack as t; t.download(['python'])"
-
 COPY config.py ./
+COPY scripts/ ./scripts/
+RUN python scripts/download_models.py
+
 COPY src/ ./src/
 COPY app/ ./app/
 COPY --from=frontend /frontend/dist ./frontend/dist
@@ -50,11 +48,13 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # The entrypoint starts as root only to fix volume ownership, then drops to appuser.
 # Hugging Face Spaces runs the container as uid 1000 directly, which is appuser.
-# Cloned repos, Chroma vectors and per-user index metadata live in /app/data.
+# Cloned repos (deleted after indexing) and, without QDRANT_URL, local Qdrant files
+# live in /app/data.
 RUN chmod 755 /usr/local/bin/docker-entrypoint.sh \
     && useradd --create-home --uid 1000 appuser \
     && mkdir -p /app/data \
-    && chown -R appuser:appuser /app/data /opt/hf-cache /opt/cache
+    && mkdir -p /opt/hf-cache /opt/cache \
+    && chown -R appuser:appuser /app/data /opt/hf-cache /opt/cache /opt/models
 
 ENV PORT=8000
 EXPOSE 8000

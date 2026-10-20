@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import threading
 import os
+from collections import OrderedDict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -17,7 +18,9 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from config import CONFIG
-from src.pipeline.rag import RAGPipeline, read_index_meta, get_index_meta_path
+from src.ingest.loader import normalize_github_url
+from src.pipeline.rag import RAGPipeline, RepoTooLargeError
+from src.storage.index_meta import read_index_meta
 
 from app import models, auth
 from app.database import db
@@ -40,15 +43,24 @@ app.add_middleware(
 
 app.include_router(auth.router)
 
-_pipelines: dict[str, RAGPipeline] = {}
+# Recently active users keep a ready pipeline. The models inside are shared, so each
+# entry only costs that user's keyword index; the oldest entry is dropped past the cap.
+_MAX_PIPELINES = int(os.getenv("MAX_CACHED_PIPELINES", "20"))
+_pipelines: OrderedDict[str, RAGPipeline] = OrderedDict()
 _lock = threading.Lock()
+# One ingest at a time: embedding is the heaviest thing this server does.
+_ingest_lock = threading.Lock()
 
 
-def pipeline(user_id: int) -> RAGPipeline:
+def pipeline(user_id: str) -> RAGPipeline:
     uid = str(user_id)
     with _lock:
-        if uid not in _pipelines:
+        if uid in _pipelines:
+            _pipelines.move_to_end(uid)
+        else:
             _pipelines[uid] = RAGPipeline(uid)
+            while len(_pipelines) > _MAX_PIPELINES:
+                _pipelines.popitem(last=False)
         return _pipelines[uid]
 
 
@@ -97,11 +109,21 @@ def status(user: models.User = Depends(auth.get_current_user)) -> dict:
 def ingest(body: IngestBody, user: models.User = Depends(auth.get_current_user)) -> dict:
     source = body.source.strip()
     if not source:
-        raise HTTPException(400, "Repository URL or path is required.")
+        raise HTTPException(400, "Repository URL is required.")
+    url = normalize_github_url(source)
+    if url is None:
+        raise HTTPException(
+            400, "Paste a public GitHub repo URL, like https://github.com/pallets/click")
+    if not _ingest_lock.acquire(blocking=False):
+        raise HTTPException(429, "Another repository is being indexed. Try again in a minute.")
     try:
-        n = pipeline(user.id).ingest(source)
+        n = pipeline(user.id).ingest(url)
+    except RepoTooLargeError as e:
+        raise HTTPException(413, str(e))
     except Exception as e:
         raise HTTPException(500, f"{type(e).__name__}: {e}")
+    finally:
+        _ingest_lock.release()
     return {"n_chunks": n, "index": read_index_meta(user.id)}
 
 

@@ -1,29 +1,71 @@
-# Render Blueprint: one Docker web service serving the API + React UI.
-# MongoDB is external (MongoDB Atlas free M0). See README "Deploy to Render".
+# Render Blueprint: free backend + free static frontend.
+# Vectors live in Qdrant Cloud and users/chat history/index info in MongoDB Atlas,
+# so nothing is lost when Render's free server restarts or wipes its disk.
+# Step-by-step guide: README -> "Deploy free on Render".
 services:
+  # ---- Backend: FastAPI ---------------------------------------------------
   - type: web
-    name: reposage
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    # The embedding model + torch need ~1-1.5 GB RAM; "starter" (512 MB) will OOM.
-    plan: standard
-    region: oregon
+    name: reposage-api
+    runtime: python
+    plan: free                       # 0.1 CPU, 512 MB RAM, sleeps after 15 min idle
+    region: singapore
+    buildCommand: pip install -r requirements.txt && python scripts/download_models.py
+    startCommand: uvicorn app.api:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
     healthCheckPath: /api/health
     autoDeploy: true
-    # Persists cloned repos, Chroma vectors and index metadata across deploys.
-    disk:
-      name: reposage-data
-      mountPath: /app/data
-      sizeGB: 5
+    buildFilter:
+      ignoredPaths:
+        - frontend/**
+        - eval/**
+        - "**/*.md"
     envVars:
-      - key: MONGO_URI
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # --- secrets: Render asks for these when you create the Blueprint ---
+      - key: MONGO_URI               # mongodb+srv://... from MongoDB Atlas
         sync: false
-      - key: SECRET_KEY
-        generateValue: true
-      - key: LLM_PROVIDER
-        value: groq
+      - key: QDRANT_URL              # https://xxxx.cloud.qdrant.io:6333
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
       - key: GROQ_API_KEY
         sync: false
-      # Only needed if you also host the frontend elsewhere (e.g. Vercel).
-      - key: FRONTEND_URL
+      - key: FRONTEND_URL            # https://reposage-ui.onrender.com (the static site's URL)
+        sync: false
+      - key: SECRET_KEY              # JWT signing key, generated for you
+        generateValue: true
+      # --- settings ---
+      - key: LLM_PROVIDER
+        value: groq
+      - key: EMBED_MODEL
+        value: BAAI/bge-small-en-v1.5
+      - key: RETRIEVER
+        value: hybrid                # best on the eval set; see README "Evaluation"
+      - key: RERANK
+        value: "0"                   # the reranker lowered scores in the eval, and costs RAM
+      - key: EMBED_THREADS
+        value: "1"
+      - key: EMBED_BATCH_SIZE
+        value: "16"
+      - key: MAX_INGEST_CHUNKS
+        value: "3000"
+      - key: MAX_CACHED_PIPELINES
+        value: "10"
+
+  # ---- Frontend: React static site ----------------------------------------
+  - type: web
+    name: reposage-ui
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/dist
+    buildFilter:
+      paths:
+        - frontend/**
+    routes:
+      # React Router: /login and other app paths must load index.html on refresh.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL            # https://reposage-api.onrender.com (the backend's URL)
         sync: false

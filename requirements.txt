@@ -1,27 +1,20 @@
-# --- Core RAG stack (Phase 1) ---
-sentence-transformers>=3.0        # BGE-M3 local embeddings + (later) cross-encoder reranker
-chromadb>=0.5                     # local vector store
+# Kept small on purpose: the free Render server has 512 MB of memory.
+# No PyTorch: embeddings and the optional reranker run on ONNX via FastEmbed.
+
+# --- RAG core ---
+fastembed>=0.7,<1.0               # local embeddings + optional cross-encoder reranker (ONNX)
+qdrant-client>=1.12               # vector store (Qdrant Cloud, or local mode for dev)
 langchain-text-splitters>=0.3     # code-aware RecursiveCharacterTextSplitter.from_language
-openai>=1.50                      # OpenAI-compatible client → Gemini / Groq / OpenRouter (free)
+openai>=1.50                      # OpenAI-compatible client -> Groq / Gemini / OpenRouter
 anthropic>=0.40                   # optional: native Claude client (LLM_PROVIDER=anthropic)
 python-dotenv>=1.0                # load .env
 tqdm>=4.66                        # ingest progress bars
+rank-bm25>=0.2                    # keyword half of hybrid search
+langgraph>=0.2                    # agent mode: retrieve -> grade -> rewrite -> answer
 
-# --- Phase 2: measured upgrades ---
-rank-bm25>=0.2                    # sparse half of hybrid search
-tree-sitter>=0.23                 # AST-based chunking
-tree-sitter-language-pack>=0.4    # prebuilt grammars (py, js, ts, go, java, ...)
-
-# --- Phase 3: agentic loop ---
-langgraph>=0.2                    # self-correcting retrieve→grade→rewrite→answer state machine
-
-# --- Phase 4: serving ---
-streamlit>=1.38                   # quick chat UI
-fastapi>=0.115                    # backend API
-uvicorn[standard]>=0.30           # ASGI server
-
-# Phase 2 eval (ragas) and Phase 3 (langgraph, langsmith) are added when we reach them,
-# to keep the Phase-1 install lean and fast.
+# --- Serving ---
+fastapi>=0.115
+uvicorn[standard]>=0.30
 
 # --- Database ---
 pymongo>=4.0
@@ -31,3 +24,7 @@ python-jose[cryptography]>=3.3
 passlib[bcrypt]>=1.7
 bcrypt>=4.0,<4.1                  # passlib 1.7.4 breaks on bcrypt>=4.1 (signup 500s)
 python-multipart>=0.0.9
+
+# Optional, not installed by default (they add install time and memory):
+#   tree-sitter>=0.23 tree-sitter-language-pack>=0.4   -> CHUNKER=treesitter
+#   streamlit>=1.38                                     -> app/streamlit_app.py
