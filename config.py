@@ -83,7 +83,8 @@ LLM_PRESETS = {
     },
     "groq": {
         "base_url": "https://api.groq.com/openai/v1",
-        "model": "llama-3.3-70b-versatile",
+        # llama-3.3-70b-versatile was shut down on Groq on 2026-08-16.
+        "model": "openai/gpt-oss-120b",
         "key_env": "GROQ_API_KEY",
     },
     "openrouter": {
